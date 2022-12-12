@@ -36,7 +36,7 @@ const UN_S_BOX: [[u8; 16]; 16] = [
     [0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d],
 ];
 
-fn split_data(data: u128) -> [u8; 16] {
+pub fn split_data(data: u128) -> [u8; 16] {
     let mut byte_array: [u8; 16] = [0; 16];
     for i in 0..byte_array.len() {
         byte_array[15 - i] = (data >> (i * 8)) as u8
@@ -44,7 +44,7 @@ fn split_data(data: u128) -> [u8; 16] {
     byte_array
 }
 
-fn unsplit(byte_array: [u8; 16]) -> u128 {
+pub fn unsplit(byte_array: [u8; 16]) -> u128 {
     let mut sum: u128 = 0;
     for i in 0..byte_array.len() {
         sum += (byte_array[i] as u128) << ((15 - i) * 8);
@@ -52,7 +52,7 @@ fn unsplit(byte_array: [u8; 16]) -> u128 {
     sum
 }
 
-fn sub_byte(data: [u8; 16]) -> [u8; 16] {
+pub fn sub_byte(data: [u8; 16]) -> [u8; 16] {
     let mut new: [u8; 16] = [0; 16];
     for i in 0..data.len() {
         let higher: usize = ((data[i] & 0xF0) >> 4) as usize;
@@ -62,7 +62,7 @@ fn sub_byte(data: [u8; 16]) -> [u8; 16] {
     new
 }
 
-fn unsub_byte(data: [u8; 16]) -> [u8; 16] {
+pub fn unsub_byte(data: [u8; 16]) -> [u8; 16] {
     let mut new: [u8; 16] = [0; 16];
     for i in 0..data.len() {
         let higher: usize = ((data[i] & 0xF0) >> 4) as usize;
@@ -72,16 +72,17 @@ fn unsub_byte(data: [u8; 16]) -> [u8; 16] {
     new
 }
 
-fn shift_rows(data: [u8; 16]) -> [u8; 16] {
+pub fn shift_rows(data: [u8; 16]) -> [u8; 16] {
 
-    // Column 1
+    
     [
+        // Column 1
         data[0], data[5], data[10], data[15],
-    // Column 2
+        // Column 2
         data[4], data[9], data[14], data[3],
-    // Column 3
+        // Column 3
         data[8], data[13], data[2], data[7],
-    // Column 4
+        // Column 4
         data[12], data[1], data[6], data[11]
     ]
 
@@ -102,9 +103,26 @@ fn unshift_rows(data: [u8; 16]) -> [u8; 16] {
     
 }
 
-fn mix_columns(data: &[u8; 4]) -> [u8; 4] {
+pub fn mix_columns(data: [u8; 16]) -> [u8; 16] {
+    let b0: [u8; 4] = mix_column([data[0], data[1], data[2], data[3]]);
+    let b1: [u8; 4] = mix_column([data[4], data[5], data[6], data[7]]);
+    let b2: [u8; 4] = mix_column([data[8], data[9], data[10], data[11]]);
+    let b3: [u8; 4] = mix_column([data[12], data[13], data[14], data[15]]);
+    
+    let mut result: [u8; 16] =  [0; 16];
+    for i in 0..4 {
+        result[i] = b0[i];
+        result[i + 4] = b1[i];
+        result[i + 8] = b2[i];
+        result[i + 12] = b3[i];
+    }
+    result
+}
+
+fn mix_column(data: [u8; 4]) -> [u8; 4] {
 
     let mul02 = |i: u8| -> u8 {
+        // 0x02 = 0b0010
         if i >= 128 {
             let p: u8 = 0b00011011;
             (i << 1) ^ p
@@ -133,13 +151,11 @@ fn mix_columns(data: &[u8; 4]) -> [u8; 4] {
 }
 
 fn unmix_columns(data: [u8; 4]) -> [u8; 4] {
-    fn mod_p(i: u16) -> u8 {
-        let p: u16 = 0b100011011;
-        let p9: u16 = 0b1000110110;
-        let p10: u16 = 0b10001101100;
+    fn mod_p(mut pol: u16) -> u8 {
+        let p: u16 = 0b11011;
+        let p9: u16 = 0b110110;
+        let p10: u16 = 0b1101100;
     
-        let mut pol = i;
-        
         if pol >= 512 {
             pol ^= p10;
         }
@@ -178,41 +194,65 @@ fn unmix_columns(data: [u8; 4]) -> [u8; 4] {
     [b0, b1, b2, b3]
 }
 
-fn key_addition(key: u128, data: u128) -> u128 {
+pub fn key_addition(key: u128, data: u128) -> u128 {
     key ^ data
 }
 
-fn key_scedule(key: u128) -> [u128; 10] {
+pub fn key_schedule(key: u128) -> [u128; 10] {
     let mut rc: u8 = 0b1;
-    let keys: [u128; 10] = [0; 10];
-    let words: [u32; 4] = [
+    let mut keys: [u128; 10] = [0; 10];
+    let mut words: [u32; 4] = [
        (key >> 96) as u32,
        (key >> 64) as u32,
        (key >> 32) as u32,
        (key >> 0) as u32,
     ];
-    fn sub_word(word: u32) -> u32 {
-        let mut new_word: u32 = 0;
-        
-        new_word
+    fn rot_word(word: u32) -> u32 {
+        word.rotate_left(8)
     }
-    let g = |word: u32| -> u32 {
+    let mut g = |word: u32| -> u32 {
         let mut new_word: u32 = 0;
-        for i in 0..3 {
-            new_word += (((word >> (i * 8)) as u8 ^ rc) as u32) >> (i * 8) ;
+        for i in 0..4 {
+            let byte: u8 = (word >> (i * 8)) as u8;
+            let higher: usize = ((byte & 0xF0) >> 4) as usize;
+            let lower: usize = (byte & 0xF) as usize;
+            let sub = S_BOX[higher][lower];
+            new_word += (sub as u32) << (i * 8);
         }
-        0
-    };
-    let p: u8 = 0b11011;
-    for _ in 0..10 {
         
+        new_word ^= (rc as u32) << 24;
+        rc = increase(rc);
+        new_word
+    };
+    fn increase(rc: u8) -> u8 {
+        let new_rc = rc << 1;
+        if rc >= 128 {
+            let p: u8 = 0b00011011;
+            new_rc ^ p
+        }
+        else {
+            new_rc
+        }
+    }
+    let mut add_key = |w: [u32; 4], index: usize| {
+        keys[index] = ((w[0] as u128) << 96) + ((w[1] as u128) << 64) + ((w[2] as u128) << 32) + (w[3] as u128)
+    };
+    add_key(words, 0);
+    for i in 1..10 {
+        let func = g(rot_word(words[3]));
+        let w0 = words[0] ^ func;
+        let w1 = words[1] ^ w0;
+        let w2 = words[2] ^ w1;
+        let w3 = words[3] ^ w2;
+        words = [w0, w1, w2, w3];
+        add_key(words, i);
     }
     keys
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{split_data, unsplit, shift_rows, unshift_rows, key_addition, sub_byte, unsub_byte, mix_columns, unmix_columns, key_scedule};
+    use crate::{split_data, unsplit, shift_rows, unshift_rows, key_addition, sub_byte, unsub_byte, mix_columns, unmix_columns, mix_column, key_schedule};
     //use rand::RngCore;
 
     #[test]
@@ -226,6 +266,11 @@ mod tests {
         let result = split_data(data);
         let should: [u8; 16] = [0; 16];
         assert_eq!(result, should);
+
+        let data: u128 = 0x00010203040506070809101112131415;
+        let result: [u8; 16] = split_data(data);
+        let should: [u8; 16] = [0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15];
+        assert_eq!(result, should)
     }
 
     #[test]
@@ -266,10 +311,11 @@ mod tests {
         assert_eq!(result, should);
 
         //Round: 1
-        let first_subkey = key_scedule(key)[0];
-        let data: u128 = 0x04e0482866cbf8068119d326e59a7a4c;
-        let result: u128 = 0xa088232afa54a36cfe2c397617b13905;
-        let actual: u128 = key_addition(key, data);
+        let first_subkey = key_schedule(key)[1];
+        println!("{:x}", first_subkey);
+        let data: u128 = 0x046681e5e0cb199a48f8d37a2806264c;
+        let result: u128 = 0xa49c7ff2689f352b6b5bea43026a5049;
+        let actual: u128 = key_addition(first_subkey, data);
         assert_eq!(result, actual)
     }
 
@@ -279,7 +325,6 @@ mod tests {
         let data: u128 = 0x193de3bea0f4e22b9ac68d2ae9f84808;
         let bytes = split_data(data);
         let result = sub_byte(bytes);
-        println!("{:?}", bytes);
         let actual:[u8; 16] = [
             0xd4, 0x27, 0x11, 0xae,
             0xe0, 0xbf, 0x98, 0xf1,
@@ -289,7 +334,6 @@ mod tests {
         assert_eq!(result, actual);
 
         let result = unsub_byte(actual);
-        println!("{:?}", result);
         assert_eq!(data, unsplit(result))
     }
 
@@ -325,22 +369,24 @@ mod tests {
         let b2: [u8; 4] = [data[8], data[9], data[10], data[11]];
         let b3: [u8; 4] = [data[12], data[13], data[14], data[15]];
 
-        let c0 = mix_columns(&b0);
+        let c0 = mix_column(b0);
         let actual_c0: [u8; 4] = [0x04, 0x66, 0x81, 0xe5];
         assert_eq!(c0, actual_c0);
 
-        // let new_b0: [u8; 4] = unmix_columns(c0);
-        // assert_eq!(b0, new_b0);
+        let new_b0: [u8; 4] = unmix_columns(c0);
+        println!("{:x?}", new_b0);
+        println!("{:x?}", b0);
+        assert_eq!(b0, new_b0);
 
-        let c1 = mix_columns(&b1);
+        let c1 = mix_column(b1);
         let actual_c1: [u8; 4] = [0xe0, 0xcb, 0x19, 0x9a];
         assert_eq!(c1, actual_c1);
 
-        let c2 = mix_columns(&b2);
+        let c2 = mix_column(b2);
         let actual_c2: [u8; 4] = [0x48, 0xf8, 0xd3, 0x7a];
         assert_eq!(c2, actual_c2);
 
-        let c3 = mix_columns(&b3);
+        let c3 = mix_column(b3);
         let actual_c3: [u8; 4] = [0x28, 0x06, 0x26, 0x4c];
         assert_eq!(c3, actual_c3);
         
