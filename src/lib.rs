@@ -150,20 +150,36 @@ fn mix_column(data: [u8; 4]) -> [u8; 4] {
     [c0, c1, c2, c3]
 }
 
-fn unmix_columns(data: [u8; 4]) -> [u8; 4] {
-    fn mod_p(mut pol: u16) -> u8 {
-        let p: u16 = 0b11011;
-        let p9: u16 = 0b110110;
-        let p10: u16 = 0b1101100;
+fn unmix_columns(data: [u8; 16]) -> [u8; 16] {
+    let b0: [u8; 4] = unmix_column([data[0], data[1], data[2], data[3]]);
+    let b1: [u8; 4] = unmix_column([data[4], data[5], data[6], data[7]]);
+    let b2: [u8; 4] = unmix_column([data[8], data[9], data[10], data[11]]);
+    let b3: [u8; 4] = unmix_column([data[12], data[13], data[14], data[15]]);
     
-        if pol >= 512 {
+    let mut result: [u8; 16] =  [0; 16];
+    for i in 0..4 {
+        result[i] = b0[i];
+        result[i + 4] = b1[i];
+        result[i + 8] = b2[i];
+        result[i + 12] = b3[i];
+    }
+    result
+}
+
+fn unmix_column(data: [u8; 4]) -> [u8; 4] {
+    fn mod_p(mut pol: u16) -> u8 {
+        let p: u16 = 0b100011011;
+        let p9: u16 = 0b1000110110;
+        let p10: u16 = 0b10001101100;
+    
+        if pol >> 10 & 1 == 1 {
             pol ^= p10;
         }
-        if pol >= 256 {
+        if pol >> 9 & 1 == 1  {
             pol ^= p9; 
             
         }
-        if pol >= 128 {
+        if pol >> 8 & 1 == 1 {
             pol ^= p;  
         }
         pol as u8
@@ -198,9 +214,9 @@ pub fn key_addition(key: u128, data: u128) -> u128 {
     key ^ data
 }
 
-pub fn key_schedule(key: u128) -> [u128; 10] {
+pub fn key_schedule(key: u128) -> [u128; 11] {
     let mut rc: u8 = 0b1;
-    let mut keys: [u128; 10] = [0; 10];
+    let mut keys: [u128; 11] = [0; 11];
     let mut words: [u32; 4] = [
        (key >> 96) as u32,
        (key >> 64) as u32,
@@ -238,7 +254,7 @@ pub fn key_schedule(key: u128) -> [u128; 10] {
         keys[index] = ((w[0] as u128) << 96) + ((w[1] as u128) << 64) + ((w[2] as u128) << 32) + (w[3] as u128)
     };
     add_key(words, 0);
-    for i in 1..10 {
+    for i in 1..11 {
         let func = g(rot_word(words[3]));
         let w0 = words[0] ^ func;
         let w1 = words[1] ^ w0;
@@ -250,10 +266,31 @@ pub fn key_schedule(key: u128) -> [u128; 10] {
     keys
 }
 
+fn encrypt(data: u128, key: u128) -> u128 {
+    let keys: [u128; 11] = key_schedule(key);
+    let mut data = key_addition(keys[0], data);
+    for i in 1..10 {
+        data = key_addition(keys[i], unsplit(mix_columns(shift_rows(sub_byte(split_data(data))))));
+    }
+    key_addition(keys[10], unsplit(shift_rows(sub_byte(split_data(data)))))
+}
+
+fn decrypt(data: u128, key: u128) -> u128 {
+    let keys: [u128; 11] = key_schedule(key);
+    let mut data = key_addition(keys[10], unsplit(unshift_rows(unsub_byte(split_data(data)))));
+    for i in (1..10).rev() {
+        data = key_addition(
+            keys[i], 
+            unsplit(sub_byte(unshift_rows(unmix_columns(split_data(data)))))
+        )
+    }
+    key_addition(keys[0], data)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{split_data, unsplit, shift_rows, unshift_rows, key_addition, sub_byte, unsub_byte, mix_columns, unmix_columns, mix_column, key_schedule};
-    //use rand::RngCore;
+    use crate::{split_data, unsplit, shift_rows, unshift_rows, key_addition, sub_byte, unsub_byte, mix_column, key_schedule, encrypt, unmix_column, decrypt};
+    use rand::Rng;
 
     #[test]
     fn test_split() {
@@ -373,9 +410,7 @@ mod tests {
         let actual_c0: [u8; 4] = [0x04, 0x66, 0x81, 0xe5];
         assert_eq!(c0, actual_c0);
 
-        let new_b0: [u8; 4] = unmix_columns(c0);
-        println!("{:x?}", new_b0);
-        println!("{:x?}", b0);
+        let new_b0: [u8; 4] = unmix_column(c0);
         assert_eq!(b0, new_b0);
 
         let c1 = mix_column(b1);
@@ -390,5 +425,35 @@ mod tests {
         let actual_c3: [u8; 4] = [0x28, 0x06, 0x26, 0x4c];
         assert_eq!(c3, actual_c3);
         
+    }
+    #[test]
+    fn test_encryption() {
+        let input: u128 = 0x3243f6a8885a308d313198a2e0370734;
+        let main_key: u128 = 0x2b7e151628aed2a6abf7158809cf4f3c;
+        let result: u128 = encrypt(input, main_key);
+        println!("{:x}", result);
+        let actual: u128 = 0x3925841d02dc09fbdc118597196a0b32;
+        println!("{:x}", actual);
+
+        assert_eq!(result, actual);
+    }
+
+    fn test_decryption() {
+        let input: u128 = 0x3925841d02dc09fbdc118597196a0b32;
+        let main_key: u128 = 0x2b7e151628aed2a6abf7158809cf4f3c;
+        let result: u128 = decrypt(input, main_key);
+        println!("{:x}", result);
+        let actual: u128 = 0x3243f6a8885a308d313198a2e0370734;
+        println!("{:x}", actual);
+
+        assert_eq!(result, actual);
+    }
+
+    fn test_cryptosys() {
+        for _ in 0..=1000 {
+            let input: u128 = rand::thread_rng().gen_range(0 .. u128::MAX);
+            let key: u128 = 0x2b7e151628aed2a6abf7158809cf4f3c;
+            assert_eq!(input, encrypt(decrypt(input, key), key))
+        }
     }
 }
